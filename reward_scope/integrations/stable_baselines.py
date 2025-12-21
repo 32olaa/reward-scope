@@ -57,6 +57,9 @@ class RewardScopeCallback(BaseCallback):
         enable_boundary_exploitation: bool = True,
         observation_bounds: Optional[tuple] = None,
         action_bounds: Optional[tuple] = None,
+        # Dashboard settings
+        start_dashboard: bool = False,
+        dashboard_port: int = 8050,
         # Other settings
         verbose: int = 1,
     ):
@@ -69,12 +72,19 @@ class RewardScopeCallback(BaseCallback):
             enable_*: Enable/disable specific detectors
             observation_bounds: (low, high) for boundary exploitation detector
             action_bounds: (low, high) for boundary exploitation detector
+            start_dashboard: Whether to auto-start the web dashboard
+            dashboard_port: Port for the dashboard server
             verbose: Verbosity level (0=silent, 1=info, 2=debug)
         """
         super().__init__(verbose=verbose)
 
         self.run_name = run_name
         self.storage_dir = storage_dir
+        self.start_dashboard = start_dashboard
+        self.dashboard_port = dashboard_port
+
+        # Dashboard process
+        self._dashboard_process = None
 
         # Initialize collector
         self.collector = DataCollector(
@@ -114,6 +124,37 @@ class RewardScopeCallback(BaseCallback):
         if self.verbose >= 1:
             print(f"[RewardScope] Starting data collection for run: {self.run_name}")
             print(f"[RewardScope] Storage directory: {self.storage_dir}")
+
+        # Start dashboard if requested
+        if self.start_dashboard:
+            self._start_dashboard()
+
+    def _start_dashboard(self) -> None:
+        """Start the dashboard server in a subprocess."""
+        import subprocess
+        import sys
+
+        self._dashboard_process = subprocess.Popen(
+            [sys.executable, "-m", "reward_scope.cli", "dashboard",
+             "--run-name", self.run_name,
+             "--data-dir", self.storage_dir,
+             "--port", str(self.dashboard_port)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        if self.verbose >= 1:
+            print(f"[RewardScope] 🌐 Dashboard started at http://localhost:{self.dashboard_port}")
+
+    def _stop_dashboard(self) -> None:
+        """Stop the dashboard server."""
+        if self._dashboard_process:
+            self._dashboard_process.terminate()
+            try:
+                self._dashboard_process.wait(timeout=5)
+            except:
+                self._dashboard_process.kill()
+            self._dashboard_process = None
 
     def _on_step(self) -> bool:
         """
@@ -263,6 +304,9 @@ class RewardScopeCallback(BaseCallback):
                 print("  Alert breakdown:")
                 for alert_type, count in alert_types.items():
                     print(f"    - {alert_type}: {count}")
+
+        # Stop dashboard
+        self._stop_dashboard()
 
         # Close collector (flush remaining data)
         self.collector.close()

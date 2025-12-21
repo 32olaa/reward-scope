@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}RewardScope - {{ run_name }}{% endblock %}
+
+{% block header %}
+<span class="run-name">{{ run_name }}</span>
+<span class="status" id="connection-status">Connecting...</span>
+{% endblock %}
+
+{% block content %}
+<div class="grid">
+    <!-- Live Stats -->
+    <section class="card stats" id="live-stats">
+        <h2>Live Stats</h2>
+        <div class="stat">
+            <span class="label">Current Step</span>
+            <span class="value" id="current-step">0</span>
+        </div>
+        <div class="stat">
+            <span class="label">Current Episode</span>
+            <span class="value" id="current-episode">0</span>
+        </div>
+        <div class="stat">
+            <span class="label">Hacking Score</span>
+            <span class="value" id="hacking-score">0.00</span>
+        </div>
+    </section>
+    
+    <!-- Reward Timeline -->
+    <section class="card chart-card" id="reward-timeline">
+        <h2>Reward Timeline</h2>
+        <canvas id="reward-chart"></canvas>
+    </section>
+    
+    <!-- Component Breakdown -->
+    <section class="card chart-card" id="component-breakdown">
+        <h2>Component Breakdown</h2>
+        <canvas id="component-chart"></canvas>
+    </section>
+    
+    <!-- Episode History -->
+    <section class="card chart-card" id="episode-history">
+        <h2>Episode History</h2>
+        <canvas id="episode-chart"></canvas>
+    </section>
+    
+    <!-- Alerts Panel -->
+    <section class="card alerts" id="alerts-panel">
+        <h2>⚠️ Hacking Alerts</h2>
+        <div id="alerts-list" 
+             hx-get="/api/alerts" 
+             hx-trigger="every 2s"
+             hx-swap="innerHTML">
+            <p class="no-alerts">Loading alerts...</p>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/charts.js"></script>
+{% endblock %}
+
