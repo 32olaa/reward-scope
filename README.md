@@ -207,10 +207,10 @@ Contributions welcome! Please:
 If you use RewardScope in your research, please cite:
 
 ```bibtex
-@software{rewardscope2024,
+@software{rewardscope2025,
   title = {RewardScope: Real-time Reward Debugging for Reinforcement Learning},
   author = {Your Name},
-  year = {2024},
+  year = {2025},
   url = {https://github.com/your-org/reward-scope}
 }
 ```
