@@ -33,7 +33,7 @@ def main():
         print(f"Error: Could not create LunarLander environment.")
         print(f"   {e}")
         print("\nTo run this example, install Box2D:")
-        print("   pip install gymnasium[box2d]")
+        print("   pip install 'gymnasium[box2d]'")
         print("\nOr try the cartpole_basic.py example instead:")
         print("   python examples/cartpole_basic.py")
         return
