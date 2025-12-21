@@ -18,9 +18,21 @@ setup(
     author="RewardScope Contributors",
     python_requires=">=3.8",
     packages=find_packages(exclude=["tests", "tests.*", "examples", "examples.*"]),
+    package_data={
+        "reward_scope": [
+            "dashboard/templates/*.html",
+            "dashboard/templates/static/*.css",
+            "dashboard/templates/static/*.js",
+        ],
+    },
     install_requires=[
         "numpy>=1.21.0",
         "gymnasium>=0.28.0",
+        "fastapi>=0.100.0",
+        "uvicorn[standard]>=0.23.0",
+        "jinja2>=3.1.0",
+        "websockets>=11.0",
+        "click>=8.0.0",
     ],
     extras_require={
         "sb3": [
@@ -36,6 +48,11 @@ setup(
             "pytest>=7.0.0",
             "black>=23.0.0",
             "ruff>=0.0.280",
+        ],
+    },
+    entry_points={
+        "console_scripts": [
+            "reward-scope=reward_scope.cli:cli",
         ],
     },
     classifiers=[

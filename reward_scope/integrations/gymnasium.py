@@ -63,6 +63,9 @@ class RewardScopeWrapper(gym.Wrapper):
         enable_component_imbalance: bool = True,
         enable_reward_spiking: bool = True,
         enable_boundary_exploitation: bool = True,
+        # Dashboard settings
+        start_dashboard: bool = False,
+        dashboard_port: int = 8050,
         # Other settings
         verbose: int = 0,
     ):
@@ -74,6 +77,8 @@ class RewardScopeWrapper(gym.Wrapper):
             auto_extract_prefix: Prefix for auto-extracting reward components from info dict
             component_fns: Dict of component_name -> function(obs, action, info) -> float
             enable_*: Enable/disable specific detectors
+            start_dashboard: Whether to auto-start the web dashboard
+            dashboard_port: Port for the dashboard server
             verbose: Verbosity level (0=silent, 1=info, 2=debug)
         """
         super().__init__(env)
@@ -81,6 +86,10 @@ class RewardScopeWrapper(gym.Wrapper):
         self.run_name = run_name
         self.storage_dir = storage_dir
         self.verbose = verbose
+        self.dashboard_port = dashboard_port
+
+        # Dashboard process
+        self._dashboard_process = None
 
         # Initialize collector
         self.collector = DataCollector(
@@ -138,6 +147,37 @@ class RewardScopeWrapper(gym.Wrapper):
         self.current_episode_step = 0
         self._last_observation = None
         self._last_action = None
+
+        # Start dashboard if requested
+        if start_dashboard:
+            self._start_dashboard()
+
+    def _start_dashboard(self) -> None:
+        """Start the dashboard server in a subprocess."""
+        import subprocess
+        import sys
+
+        self._dashboard_process = subprocess.Popen(
+            [sys.executable, "-m", "reward_scope.dashboard.app",
+             "--run-name", self.run_name,
+             "--data-dir", self.storage_dir,
+             "--port", str(self.dashboard_port)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        if self.verbose >= 1:
+            print(f"[RewardScope] Dashboard started at http://localhost:{self.dashboard_port}")
+
+    def _stop_dashboard(self) -> None:
+        """Stop the dashboard server."""
+        if self._dashboard_process:
+            self._dashboard_process.terminate()
+            try:
+                self._dashboard_process.wait(timeout=5)
+            except:
+                self._dashboard_process.kill()
+            self._dashboard_process = None
 
     def reset(
         self,
@@ -292,6 +332,9 @@ class RewardScopeWrapper(gym.Wrapper):
 
         # Close collector
         self.collector.close()
+
+        # Stop dashboard
+        self._stop_dashboard()
 
         if self.verbose >= 1:
             print(f"[RewardScope] Run complete!")
