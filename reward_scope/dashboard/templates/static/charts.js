@@ -232,6 +232,12 @@ async function fetchInitialData() {
             episodeChart.data.labels = episodeData.episodes.map(e => `Ep ${e}`);
             episodeChart.data.datasets[0].data = episodeData.total_rewards;
             episodeChart.update();
+
+            // Update hacking score from latest episode
+            if (episodeData.hacking_scores && episodeData.hacking_scores.length > 0) {
+                const latestScore = episodeData.hacking_scores[episodeData.hacking_scores.length - 1];
+                document.getElementById('hacking-score').textContent = latestScore.toFixed(2);
+            }
         }
     } catch (error) {
         console.error('Error fetching initial data:', error);
@@ -252,14 +258,20 @@ setInterval(async () => {
             componentChart.data.datasets[0].data = componentData.values;
             componentChart.update();
         }
-        
-        // Update episode history
+
+        // Update episode history and hacking score
         const episodeRes = await fetch('/api/episode-history?n=50');
         const episodeData = await episodeRes.json();
         if (!episodeData.error && episodeData.episodes) {
             episodeChart.data.labels = episodeData.episodes.map(e => `Ep ${e}`);
             episodeChart.data.datasets[0].data = episodeData.total_rewards;
             episodeChart.update();
+
+            // Update hacking score from latest episode
+            if (episodeData.hacking_scores && episodeData.hacking_scores.length > 0) {
+                const latestScore = episodeData.hacking_scores[episodeData.hacking_scores.length - 1];
+                document.getElementById('hacking-score').textContent = latestScore.toFixed(2);
+            }
         }
     } catch (error) {
         console.error('Error updating charts:', error);
