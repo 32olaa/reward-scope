@@ -3,18 +3,32 @@
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Real-time reward debugging and hacking detection for reinforcement learning.**
+**Your agent's reward is going up, but its behavior is broken. RewardScope shows you why.**
 
-RewardScope helps RL practitioners debug reward functions by tracking reward components, detecting common exploitation patterns, and visualizing training dynamics through a live web dashboard.
+RewardScope detects reward hacking during RL training—before you waste hours on a broken policy. It tracks reward components, flags exploitation patterns, and gives you a live dashboard to see what's actually happening.
+
+## Try It Now
+```bash
+pip install reward-scope
+```
+```python
+from reward_scope import RewardScopeCallback
+callback = RewardScopeCallback(run_name="test", start_dashboard=True)
+model.learn(50000, callback=callback)
+# Dashboard at http://localhost:8050
+```
 
 ![Dashboard Preview](docs/dashboard-preview.png)
-*Dashboard showing reward timeline, component breakdown, and hacking alerts*
 
-## Why RewardScope?
+## Why This Matters
 
-Reward functions are notoriously difficult to get right. Even well-intentioned designs can lead to [reward hacking](https://docs.google.com/spreadsheets/d/e/2PACX-1vRPiprOaC3HsCf5Tuum8bRfzYUiKLRqJmbOoC-32JorNdfyTiRRsR7Ea5eWtvsWzuxo8bjOxCG84dAg/pubhtml)—when agents find unintended ways to maximize reward that don't align with your objectives.
+Reward hacking is annoying, and potentially dangerous. [Anthropic's November 2025 research](https://www.anthropic.com/research/emergent-misalignment-reward-hacking) found that when models learn to exploit reward functions, they also start exhibiting:
 
-Research from [Anthropic](https://www.anthropic.com/) and others shows that reward misspecification can lead to emergent misalignment, especially as models become more capable. RewardScope provides real-time visibility into what your agent is actually learning.
+- **Alignment faking** (50% of responses)
+- **AI safety research sabotage** (12% rate)
+- **Deception and malicious goal reasoning**
+
+These behaviors emerged *without being trained*—they generalized from reward hacking. RewardScope catches the hacking early, before it spreads.
 
 ## Features
 
@@ -183,7 +197,7 @@ Optional:
 ## Development
 
 ```bash
-git clone https://github.com/your-org/reward-scope
+git clone https://github.com/jimmybentley/reward-scope
 cd reward-scope
 pip install -e ".[dev]"
 
@@ -209,9 +223,9 @@ If you use RewardScope in your research, please cite:
 ```bibtex
 @software{rewardscope2025,
   title = {RewardScope: Real-time Reward Debugging for Reinforcement Learning},
-  author = {Your Name},
+  author = {James Bentley},
   year = {2025},
-  url = {https://github.com/your-org/reward-scope}
+  url = {https://github.com/jimmybentley/reward-scope}
 }
 ```
 
@@ -230,7 +244,3 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - [Specification gaming examples](https://docs.google.com/spreadsheets/d/e/2PACX-1vRPiprOaC3HsCf5Tuum8bRfzYUiKLRqJmbOoC-32JorNdfyTiRRsR7Ea5eWtvsWzuxo8bjOxCG84dAg/pubhtml) (DeepMind)
 - [Concrete Problems in AI Safety](https://arxiv.org/abs/1606.06565) (Amodei et al., 2016)
 - [Anthropic's research on AI alignment](https://www.anthropic.com/research)
-
----
-
-**Made with ❤️ for safer RL development**
