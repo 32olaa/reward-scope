@@ -283,6 +283,37 @@ class DataCollector:
 
         return episode_data
 
+    def update_episode_hacking_data(
+        self,
+        episode: int,
+        hacking_score: float,
+        hacking_flags: List[str],
+    ) -> None:
+        """
+        Update hacking score and flags for a specific episode.
+
+        This is called after detectors have analyzed the episode data.
+
+        Args:
+            episode: Episode number to update
+            hacking_score: Overall hacking score (0-1)
+            hacking_flags: List of detected hacking patterns
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            UPDATE episodes
+            SET hacking_score = ?, hacking_flags = ?
+            WHERE episode = ?
+            """,
+            (
+                hacking_score,
+                _serialize_to_json(hacking_flags),
+                episode,
+            )
+        )
+        self.conn.commit()
+
     def get_recent_steps(self, n: int = 100) -> List[StepData]:
         """Get most recent N steps for dashboard."""
         cursor = self.conn.cursor()

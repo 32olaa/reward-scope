@@ -77,7 +77,10 @@ async def get_reward_history(n: int = 100):
 async def get_component_breakdown(n: int = 100):
     """
     Get reward component breakdown.
-    
+
+    Aggregates component totals from all completed episodes to show
+    the true distribution across the entire training run.
+
     Returns:
         {
             "components": [str],
@@ -86,21 +89,31 @@ async def get_component_breakdown(n: int = 100):
     """
     if not collector:
         return {"error": "No data collector initialized"}
-    
+
     try:
         # Flush buffer to ensure latest data is available
         collector._flush_step_buffer()
-        
-        steps = collector.get_recent_steps(n)
-        
-        # Aggregate components
+
+        # Get all episodes (or recent episodes if there are many)
+        episodes = collector.get_episode_history(n=1000)  # Get up to 1000 episodes
+
+        # Aggregate component totals from all episodes
         component_sums = {}
-        for step in steps:
-            for name, value in step.reward_components.items():
+        for episode in episodes:
+            for name, value in episode.component_totals.items():
                 if name not in component_sums:
                     component_sums[name] = 0.0
                 component_sums[name] += abs(value)  # Use absolute values for pie chart
-        
+
+        # If no episode data yet, fall back to recent steps
+        if not component_sums:
+            steps = collector.get_recent_steps(n)
+            for step in steps:
+                for name, value in step.reward_components.items():
+                    if name not in component_sums:
+                        component_sums[name] = 0.0
+                    component_sums[name] += abs(value)
+
         return {
             "components": list(component_sums.keys()),
             "values": list(component_sums.values()),

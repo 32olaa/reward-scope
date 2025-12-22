@@ -315,6 +315,17 @@ class RewardScopeWrapper(gym.Wrapper):
             for alert in episode_alerts:
                 print(f"[RewardScope] 🚨 Episode {self.episode_count}: {alert.type.value}: {alert.description}")
 
+        # Get hacking score and flags from detector suite
+        hacking_score = self.detector_suite.get_hacking_score()
+        hacking_flags = [alert.type.value for alert in self.detector_suite.get_all_alerts()]
+
+        # Update database with computed hacking data
+        self.collector.update_episode_hacking_data(
+            episode=episode_data.episode,
+            hacking_score=hacking_score,
+            hacking_flags=hacking_flags,
+        )
+
         # Reset detectors for next episode
         self.detector_suite.reset()
 
@@ -322,7 +333,7 @@ class RewardScopeWrapper(gym.Wrapper):
             print(f"[RewardScope] Episode {episode_data.episode} complete: "
                   f"reward={episode_data.total_reward:.2f}, "
                   f"length={episode_data.length}, "
-                  f"hacking_score={self.detector_suite.get_hacking_score():.3f}")
+                  f"hacking_score={hacking_score:.3f}")
 
             # Print component breakdown if available
             if episode_data.component_totals and self.verbose >= 2:
