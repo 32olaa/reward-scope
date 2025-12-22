@@ -5,7 +5,7 @@
 
 **Your agent's reward is going up, but its behavior is broken. RewardScope shows you why.**
 
-RewardScope detects reward hacking during RL training—before you waste hours on a broken policy. It tracks reward components, flags exploitation patterns, and gives you a live dashboard to see what's actually happening.
+RewardScope detects reward hacking during RL training, saving you from wasting hours on a broken policy. It tracks reward components, flags exploitation patterns, and provides a live dashboard to show exactly how your agent is learning.
 
 ## Try It Now
 ```bash
@@ -22,13 +22,13 @@ model.learn(50000, callback=callback)
 
 ## Why This Matters
 
-Reward hacking is annoying, and potentially dangerous. [Anthropic's November 2025 research](https://www.anthropic.com/research/emergent-misalignment-reward-hacking) found that when models learn to exploit reward functions, they also start exhibiting:
+Reward hacking is annoying and can quickly become dangerous. [Anthropic's November 2025 research](https://www.anthropic.com/research/emergent-misalignment-reward-hacking) found that when models learn to exploit reward functions, they also start exhibiting:
 
 - **Alignment faking** (50% of responses)
 - **AI safety research sabotage** (12% rate)
 - **Deception and malicious goal reasoning**
 
-These behaviors emerged *without being trained*—they generalized from reward hacking. RewardScope catches the hacking early, before it spreads.
+These behaviors emerged without training, generalizing from instances of reward hacking. RewardScope catches the hacking early, before it spreads.
 
 ## Features
 
