@@ -20,6 +20,12 @@ model.learn(50000, callback=callback)
 
 ![Dashboard Preview](docs/dashboard-preview.png)
 
+## Demo
+
+Watch RewardScope detect reward hacking in real-time during Overcooked multi-agent training
+
+https://github.com/user-attachments/assets/6ca3ba70-ad0c-418e-8146-5c9616669215
+
 ## Why This Matters
 
 Reward hacking is annoying and can quickly become dangerous. [Anthropic's November 2025 research](https://www.anthropic.com/research/emergent-misalignment-reward-hacking) found that when models learn to exploit reward functions, they also start exhibiting:
