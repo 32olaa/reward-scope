@@ -183,8 +183,11 @@ The live dashboard shows:
 - **Reward Timeline** - Line chart of reward per step
 - **Component Breakdown** - Pie chart of component contributions
 - **Episode History** - Bar chart of episode rewards
-- **Live Stats** - Current step, episode, hacking score
-- **Alerts Panel** - Real-time hacking detection alerts
+- **Live Stats** - Current step, episode, and **live hacking score** (updates every 50 steps)
+- **Alerts Panel** - **Grouped, collapsible alerts** showing count badges (e.g., "47x") for repeated detections
+- **Run Selector** - Switch between training runs from a collapsible sidebar
+
+Charts update in real-time via WebSocket (10Hz). Hacking score and alerts poll every 5s and 2s respectively.
 
 All charts update in real-time via WebSocket (10Hz).
 
