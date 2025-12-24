@@ -76,7 +76,8 @@ env.close()
 View the dashboard:
 
 ```bash
-reward-scope dashboard --run-name my_experiment
+reward-scope dashboard --data-dir ./reward_scope_data
+# Select your run from the sidebar
 ```
 
 Open http://localhost:8050 in your browser.
@@ -166,7 +167,8 @@ Check out the [examples/](examples/) directory:
 
 ```bash
 # Start dashboard
-reward-scope dashboard --run-name my_experiment
+reward-scope dashboard --data-dir ./reward_scope_data
+# Select your run from the sidebar
 
 # List all runs
 reward-scope list-runs ./reward_scope_data
