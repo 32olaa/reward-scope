@@ -69,7 +69,8 @@ def list_runs(data_dir: str):
         click.echo(f"    Size: {size_mb:.2f} MB | Modified: {modified}")
     
     click.echo(f"\nTo view a run, use:")
-    click.echo(f"  reward-scope dashboard --run-name <name> --data-dir {data_dir}")
+    click.echo(f"  reward-scope dashboard --data-dir {data_dir}")
+    click.echo(f"  (Select your run from the sidebar)")
 
 
 @cli.command()
