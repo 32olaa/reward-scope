@@ -11,13 +11,14 @@ Implements detection algorithms for common reward hacking patterns:
 """
 
 from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import numpy as np
 from collections import deque
 import hashlib
 
 from .baselines import BaselineCollector
+from .baseline import BaselineTracker, AlertSeverity, classify_alert
 
 
 class HackingType(Enum):
@@ -41,6 +42,9 @@ class HackingAlert:
     description: str
     evidence: Dict[str, Any]  # Supporting data
     suggested_fix: str
+    # Two-layer detection fields
+    alert_severity: AlertSeverity = field(default=AlertSeverity.ALERT)
+    baseline_z_score: Optional[float] = None  # z-score against baseline if available
 
 
 class BaseDetector:
@@ -616,20 +620,32 @@ class BoundaryExploitationDetector(BaseDetector):
 
 class HackingDetectorSuite:
     """
-    Runs all detectors and aggregates results.
+    Runs all detectors and aggregates results with optional two-layer detection.
 
     Usage:
         suite = HackingDetectorSuite()
         suite.update(step, episode, obs, action, reward, components, done, info)
         alerts = suite.get_alerts()
 
-    With adaptive baselines (experimental):
+    With two-layer detection (recommended):
         suite = HackingDetectorSuite(
-            use_adaptive_baselines=True,
+            adaptive_baseline=True,  # Enable two-layer detection
+            baseline_window=50,       # Rolling window for baseline
+            baseline_warmup=20,       # Episodes before adaptive layer activates
+            baseline_sensitivity=2.0, # Std devs for "abnormal" threshold
+        )
+
+    Two-layer detection logic:
+    1. Static detector fires + baseline abnormal → ALERT (confirmed)
+    2. Static detector fires + baseline normal → SUPPRESSED (likely false positive)
+    3. Static doesn't fire + baseline abnormal → WARNING (unusual but not severe)
+    4. Static doesn't fire + baseline normal → No alert
+
+    Legacy mode (Phase 1):
+        suite = HackingDetectorSuite(
+            use_adaptive_baselines=True,  # Legacy Phase 1 mode
             calibration_episodes=20,
         )
-        # During first 20 episodes: collects baseline statistics
-        # After calibration: fires alerts when behavior deviates >3σ from baseline
     """
 
     def __init__(
@@ -641,7 +657,12 @@ class HackingDetectorSuite:
         enable_boundary_exploitation: bool = True,
         observation_bounds: Optional[Tuple[np.ndarray, np.ndarray]] = None,
         action_bounds: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-        # Adaptive baseline settings (experimental)
+        # Two-layer detection settings (Phase 2)
+        adaptive_baseline: bool = True,
+        baseline_window: int = 50,
+        baseline_warmup: int = 20,
+        baseline_sensitivity: float = 2.0,
+        # Legacy adaptive baseline settings (Phase 1 - experimental)
         use_adaptive_baselines: bool = False,
         calibration_episodes: int = 20,
         baseline_sigma_threshold: float = 3.0,
@@ -662,7 +683,18 @@ class HackingDetectorSuite:
                 action_bounds=action_bounds,
             ))
 
-        # Adaptive baselines (experimental)
+        # Two-layer detection (Phase 2)
+        self.adaptive_baseline = adaptive_baseline
+        self.baseline_tracker: Optional[BaselineTracker] = None
+
+        if adaptive_baseline:
+            self.baseline_tracker = BaselineTracker(
+                window=baseline_window,
+                warmup=baseline_warmup,
+                sensitivity=baseline_sensitivity,
+            )
+
+        # Legacy adaptive baselines (Phase 1 - experimental)
         self.use_adaptive_baselines = use_adaptive_baselines
         self.calibration_episodes = calibration_episodes
         self.baseline_collector: Optional[BaselineCollector] = None
@@ -672,6 +704,16 @@ class HackingDetectorSuite:
                 calibration_episodes=calibration_episodes,
                 sigma_threshold=baseline_sigma_threshold,
             )
+
+        # Episode-level tracking for baseline
+        self._current_episode_reward = 0.0
+        self._current_episode_length = 0
+        self._current_episode_actions: Dict[str, int] = {}
+        self._current_episode_components: Dict[str, float] = {}
+
+        # Storage for suppressed/warning alerts
+        self._suppressed_alerts: List[HackingAlert] = []
+        self._warning_alerts: List[HackingAlert] = []
 
     def update(
         self,
@@ -687,11 +729,27 @@ class HackingDetectorSuite:
         """Run all detectors and return any alerts."""
         alerts = []
 
-        # Record step for adaptive baselines
+        # Track episode statistics for baseline tracker (Phase 2)
+        if self.baseline_tracker is not None:
+            self._current_episode_reward += reward
+            self._current_episode_length += 1
+
+            # Track action distribution
+            action_key = self._hash_action(action)
+            self._current_episode_actions[action_key] = \
+                self._current_episode_actions.get(action_key, 0) + 1
+
+            # Track component totals
+            for comp_name, comp_value in reward_components.items():
+                if comp_name != "residual":
+                    self._current_episode_components[comp_name] = \
+                        self._current_episode_components.get(comp_name, 0.0) + comp_value
+
+        # Record step for legacy adaptive baselines (Phase 1)
         if self.baseline_collector is not None:
             self.baseline_collector.record_step(action, reward, reward_components)
 
-        # During calibration phase, suppress standard detector alerts
+        # During legacy calibration phase, suppress standard detector alerts
         if self.use_adaptive_baselines and not self.is_calibrated:
             # Still run detectors to keep their internal state updated,
             # but don't return alerts during calibration
@@ -702,7 +760,7 @@ class HackingDetectorSuite:
                 )
             return alerts
 
-        # After calibration (or if not using adaptive baselines), run normally
+        # Run all detectors
         for detector in self.detectors:
             alert = detector.update(
                 step, episode, observation, action,
@@ -710,7 +768,40 @@ class HackingDetectorSuite:
             )
             if alert:
                 alerts.append(alert)
+
         return alerts
+
+    def _hash_action(self, action: Any) -> str:
+        """Convert action to a hashable string for tracking."""
+        if isinstance(action, (int, str)):
+            return str(action)
+        elif isinstance(action, (list, tuple, np.ndarray)):
+            arr = np.array(action).flatten()
+            discretized = np.round(arr, decimals=1)
+            return str(discretized.tolist())
+        else:
+            return str(action)
+
+    def _compute_action_entropy(self) -> float:
+        """Compute action entropy for current episode."""
+        if not self._current_episode_actions:
+            return 0.0
+        total = sum(self._current_episode_actions.values())
+        if total == 0:
+            return 0.0
+        probs = np.array(list(self._current_episode_actions.values())) / total
+        entropy = -np.sum(probs * np.log(probs + 1e-10))
+        return float(entropy)
+
+    def _compute_component_ratios(self) -> Dict[str, float]:
+        """Compute component ratios for current episode."""
+        total_abs = sum(abs(v) for v in self._current_episode_components.values())
+        if total_abs == 0:
+            return {}
+        return {
+            name: abs(value) / total_abs
+            for name, value in self._current_episode_components.items()
+        }
 
     @property
     def is_calibrated(self) -> bool:
@@ -727,10 +818,64 @@ class HackingDetectorSuite:
         return self.baseline_collector.calibration_progress
 
     def on_episode_end(self, episode_stats: Dict) -> List[HackingAlert]:
-        """Run episode-end checks."""
+        """Run episode-end checks with two-layer detection."""
         alerts = []
+        current_episode = episode_stats.get("episode", 0)
 
-        # Handle adaptive baseline episode end
+        # Compute current episode metrics for baseline tracker
+        action_entropy = self._compute_action_entropy()
+        component_ratios = self._compute_component_ratios()
+
+        # Update baseline tracker with episode stats (Phase 2)
+        if self.baseline_tracker is not None:
+            self.baseline_tracker.update({
+                "reward": self._current_episode_reward,
+                "length": self._current_episode_length,
+                "action_entropy": action_entropy,
+                "component_ratios": component_ratios,
+            })
+
+        # Run standard episode-end detectors first
+        static_alerts = []
+        for detector in self.detectors:
+            if isinstance(detector, ComponentImbalanceDetector):
+                alert = detector.on_episode_end(episode_stats.get("component_totals", {}))
+                if alert:
+                    static_alerts.append(alert)
+
+        # Apply two-layer detection logic (Phase 2)
+        if self.baseline_tracker is not None and self.baseline_tracker.is_active:
+            # Process static alerts through baseline filter
+            for alert in static_alerts:
+                # Determine which metric this alert relates to
+                metric_name = self._get_metric_for_alert(alert)
+                metric_value = self._get_value_for_alert(alert)
+
+                if metric_name and metric_value is not None:
+                    baseline_abnormal = self.baseline_tracker.is_abnormal(metric_name, metric_value)
+                    z_score = self.baseline_tracker.get_z_score(metric_name, metric_value)
+                    severity = classify_alert(True, baseline_abnormal)
+
+                    # Update alert with two-layer info
+                    alert.alert_severity = severity
+                    alert.baseline_z_score = z_score
+
+                    if severity == AlertSeverity.ALERT:
+                        alerts.append(alert)
+                    elif severity == AlertSeverity.SUPPRESSED:
+                        self._suppressed_alerts.append(alert)
+                        self.baseline_tracker.record_suppressed()
+                else:
+                    # Can't determine metric, treat as regular alert
+                    alerts.append(alert)
+
+            # Check for baseline-only warnings (abnormal but no static alert)
+            self._check_baseline_warnings(current_episode, alerts)
+        else:
+            # Baseline not active yet, pass through static alerts
+            alerts.extend(static_alerts)
+
+        # Handle legacy adaptive baseline episode end (Phase 1)
         if self.baseline_collector is not None:
             result = self.baseline_collector.end_episode()
 
@@ -742,8 +887,8 @@ class HackingDetectorSuite:
                 for deviation in result["deviations"]:
                     alert = HackingAlert(
                         type=HackingType.BASELINE_DEVIATION,
-                        severity=min(1.0, abs(deviation["z_score"]) / 6.0),  # 6σ = max severity
-                        step=0,  # Episode-level alert
+                        severity=min(1.0, abs(deviation["z_score"]) / 6.0),
+                        step=0,
                         episode=result["episode"],
                         description=deviation["description"],
                         evidence={
@@ -757,53 +902,136 @@ class HackingDetectorSuite:
                         suggested_fix="Check if training dynamics have changed significantly from baseline.",
                     )
                     alerts.append(alert)
-                    # Store alert in a local list for get_all_alerts
                     if not hasattr(self, '_baseline_alerts'):
                         self._baseline_alerts: List[HackingAlert] = []
                     self._baseline_alerts.append(alert)
 
-        # During calibration, suppress component imbalance alerts too
+        # During legacy calibration, suppress component imbalance alerts
         if self.use_adaptive_baselines and not self.is_calibrated:
-            return alerts  # Only return baseline-related info during calibration
+            # Filter out non-baseline alerts during legacy calibration
+            alerts = [a for a in alerts if a.type == HackingType.BASELINE_DEVIATION]
 
-        # Run standard episode-end detectors
-        for detector in self.detectors:
-            if isinstance(detector, ComponentImbalanceDetector):
-                alert = detector.on_episode_end(episode_stats.get("component_totals", {}))
-                if alert:
-                    alerts.append(alert)
+        # Reset episode tracking
+        self._current_episode_reward = 0.0
+        self._current_episode_length = 0
+        self._current_episode_actions.clear()
+        self._current_episode_components.clear()
+
         return alerts
 
-    def get_all_alerts(self) -> List[HackingAlert]:
-        """Get all historical alerts."""
+    def _get_metric_for_alert(self, alert: HackingAlert) -> Optional[str]:
+        """Map an alert type to its corresponding baseline metric."""
+        alert_to_metric = {
+            HackingType.REWARD_SPIKING: "reward",
+            HackingType.COMPONENT_IMBALANCE: None,  # Handled specially
+            HackingType.ACTION_REPETITION: "action_entropy",
+        }
+        return alert_to_metric.get(alert.type)
+
+    def _get_value_for_alert(self, alert: HackingAlert) -> Optional[float]:
+        """Get the value to compare against baseline for an alert."""
+        if alert.type == HackingType.REWARD_SPIKING:
+            return alert.evidence.get("reward")
+        elif alert.type == HackingType.ACTION_REPETITION:
+            return self._compute_action_entropy()
+        return None
+
+    def _check_baseline_warnings(self, episode: int, alerts: List[HackingAlert]) -> None:
+        """Check for baseline-only warnings (abnormal but no static alert)."""
+        if self.baseline_tracker is None or not self.baseline_tracker.is_active:
+            return
+
+        # Check core metrics for warnings
+        metrics_to_check = [
+            ("reward", self._current_episode_reward),
+            ("length", float(self._current_episode_length)),
+            ("action_entropy", self._compute_action_entropy()),
+        ]
+
+        for metric_name, value in metrics_to_check:
+            if self.baseline_tracker.is_abnormal(metric_name, value):
+                # Check if there's already a static alert for this
+                has_static = any(
+                    self._get_metric_for_alert(a) == metric_name
+                    for a in alerts
+                )
+                if not has_static:
+                    z_score = self.baseline_tracker.get_z_score(metric_name, value)
+                    warning = HackingAlert(
+                        type=HackingType.BASELINE_DEVIATION,
+                        severity=min(0.5, abs(z_score) / 6.0),  # Lower severity for warnings
+                        step=0,
+                        episode=episode,
+                        description=f"Unusual {metric_name}: {value:.2f} is {abs(z_score):.1f}σ from baseline",
+                        evidence={
+                            "metric": metric_name,
+                            "value": value,
+                            "z_score": z_score,
+                            "baseline_mean": self.baseline_tracker._reward_stats.mean if metric_name == "reward"
+                                else self.baseline_tracker._length_stats.mean if metric_name == "length"
+                                else self.baseline_tracker._entropy_stats.mean,
+                        },
+                        suggested_fix="Monitor for consistent deviation from baseline.",
+                        alert_severity=AlertSeverity.WARNING,
+                        baseline_z_score=z_score,
+                    )
+                    alerts.append(warning)
+                    self._warning_alerts.append(warning)
+                    self.baseline_tracker.record_warning()
+
+    def get_all_alerts(self, include_suppressed: bool = False) -> List[HackingAlert]:
+        """
+        Get all historical alerts.
+
+        Args:
+            include_suppressed: If True, include suppressed alerts in the result
+        """
         alerts = []
         for detector in self.detectors:
             alerts.extend(detector.alerts)
-        # Include baseline deviation alerts
+        # Include baseline deviation alerts (legacy Phase 1)
         if hasattr(self, '_baseline_alerts'):
             alerts.extend(self._baseline_alerts)
+        # Include warning alerts from two-layer detection
+        alerts.extend(self._warning_alerts)
+        # Optionally include suppressed alerts
+        if include_suppressed:
+            alerts.extend(self._suppressed_alerts)
         return sorted(alerts, key=lambda a: (a.episode, a.step))
+
+    def get_suppressed_alerts(self) -> List[HackingAlert]:
+        """Get all alerts that were suppressed by baseline filter."""
+        return list(self._suppressed_alerts)
+
+    def get_warning_alerts(self) -> List[HackingAlert]:
+        """Get all soft warnings (baseline abnormal but no static alert)."""
+        return list(self._warning_alerts)
 
     def get_hacking_score(self) -> float:
         """
         Compute overall hacking score (0-1).
         Higher = more likely the agent is hacking.
+
+        Note: Only counts non-suppressed alerts. Suppressed alerts are
+        considered false positives by the baseline filter.
         """
-        all_alerts = self.get_all_alerts()
+        # Only count non-suppressed alerts
+        all_alerts = [a for a in self.get_all_alerts()
+                      if a.alert_severity != AlertSeverity.SUPPRESSED]
 
         if not all_alerts:
             return 0.0
 
-        # Weight recent alerts more heavily
-        if len(all_alerts) == 0:
-            return 0.0
+        # Weight ALERT higher than WARNING
+        weighted_severities = []
+        for a in all_alerts[-10:]:  # Last 10 alerts
+            weight = 1.0 if a.alert_severity == AlertSeverity.ALERT else 0.5
+            weighted_severities.append(a.severity * weight)
 
-        # Take average severity of recent alerts
-        recent_alerts = all_alerts[-10:]  # Last 10 alerts
-        avg_severity = np.mean([a.severity for a in recent_alerts])
+        avg_severity = np.mean(weighted_severities) if weighted_severities else 0.0
 
         # Factor in alert frequency
-        alert_frequency = min(1.0, len(recent_alerts) / 10.0)
+        alert_frequency = min(1.0, len(all_alerts[-10:]) / 10.0)
 
         # Combine severity and frequency
         score = (avg_severity + alert_frequency) / 2.0
@@ -811,20 +1039,61 @@ class HackingDetectorSuite:
         return min(1.0, score)
 
     def reset(self) -> None:
-        """Reset all detectors (but preserve baseline calibration)."""
+        """Reset all detectors (but preserve baseline tracking)."""
         for detector in self.detectors:
             detector.reset()
-        # Note: We intentionally do NOT reset the baseline_collector here
-        # because baselines should persist across episodes
+        # Note: We intentionally do NOT reset the baseline_tracker or
+        # baseline_collector here because baselines should persist across episodes
 
     def get_baseline_summary(self) -> Optional[Dict[str, Any]]:
         """Get summary of adaptive baseline statistics (if enabled)."""
-        if self.baseline_collector is None:
-            return None
-        return self.baseline_collector.get_baseline_summary()
+        summary = {}
+
+        # Phase 2 baseline tracker summary
+        if self.baseline_tracker is not None:
+            summary["tracker"] = self.baseline_tracker.get_baseline_summary()
+
+        # Legacy Phase 1 baseline collector summary
+        if self.baseline_collector is not None:
+            summary["collector"] = self.baseline_collector.get_baseline_summary()
+
+        return summary if summary else None
+
+    def get_suppressed_count(self) -> int:
+        """Get count of suppressed alerts."""
+        if self.baseline_tracker is not None:
+            return self.baseline_tracker.suppressed_count
+        return len(self._suppressed_alerts)
+
+    def get_warning_count(self) -> int:
+        """Get count of soft warnings."""
+        if self.baseline_tracker is not None:
+            return self.baseline_tracker.warning_count
+        return len(self._warning_alerts)
+
+    @property
+    def baseline_is_active(self) -> bool:
+        """Check if two-layer baseline detection is active."""
+        if self.baseline_tracker is not None:
+            return self.baseline_tracker.is_active
+        return False
+
+    @property
+    def baseline_warmup_progress(self) -> float:
+        """Get baseline warmup progress (0.0 to 1.0)."""
+        if self.baseline_tracker is not None:
+            return self.baseline_tracker.warmup_progress
+        return 1.0
 
     def reset_baselines(self) -> None:
-        """Reset adaptive baselines (start fresh calibration)."""
+        """Reset all baselines (start fresh tracking)."""
+        # Reset Phase 2 tracker
+        if self.baseline_tracker is not None:
+            self.baseline_tracker.reset()
+        self._suppressed_alerts.clear()
+        self._warning_alerts.clear()
+
+        # Reset legacy Phase 1 collector
         if self.baseline_collector is not None:
             self.baseline_collector.reset()
         if hasattr(self, '_baseline_alerts'):
