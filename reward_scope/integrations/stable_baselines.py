@@ -20,7 +20,7 @@ except ImportError:
 
 from ..core.collector import DataCollector, StepData
 from ..core.decomposer import RewardDecomposer
-from ..core.detectors import HackingDetectorSuite
+from ..core.detectors import HackingDetectorSuite, AlertSeverity
 
 
 class RewardScopeCallback(BaseCallback):
@@ -57,6 +57,19 @@ class RewardScopeCallback(BaseCallback):
         enable_boundary_exploitation: bool = True,
         observation_bounds: Optional[tuple] = None,
         action_bounds: Optional[tuple] = None,
+        # Two-layer detection settings (Phase 2)
+        adaptive_baseline: bool = True,
+        baseline_window: int = 50,
+        baseline_warmup: int = 20,
+        baseline_sensitivity: float = 2.0,
+        # Auto-calibration settings (Phase 5)
+        min_warmup_episodes: int = 10,
+        max_warmup_episodes: int = 50,
+        stability_threshold: float = 0.1,
+        # Legacy adaptive baseline settings (Phase 1 - experimental)
+        use_adaptive_baselines: bool = False,
+        calibration_episodes: int = 20,
+        baseline_sigma_threshold: float = 3.0,
         # Dashboard settings
         start_dashboard: bool = False,
         dashboard_port: int = 8050,
@@ -74,6 +87,18 @@ class RewardScopeCallback(BaseCallback):
             enable_*: Enable/disable specific detectors
             observation_bounds: (low, high) for boundary exploitation detector
             action_bounds: (low, high) for boundary exploitation detector
+            adaptive_baseline: Enable two-layer detection (on by default). When enabled,
+                static detectors are modulated by a rolling baseline that learns what's
+                "normal" for this training run. This reduces false positives.
+            baseline_window: Rolling window size for baseline statistics (default 50 episodes)
+            baseline_warmup: Episodes before baseline layer activates (default 20)
+            baseline_sensitivity: Std devs threshold for "abnormal" (default 2.0)
+            min_warmup_episodes: Minimum warmup before auto-calibration can end (default 10)
+            max_warmup_episodes: Maximum warmup - activate anyway after this (default 50)
+            stability_threshold: Normalized variance threshold for stability (default 0.1)
+            use_adaptive_baselines: Legacy Phase 1 adaptive baselines (experimental)
+            calibration_episodes: Legacy calibration episodes (default 20)
+            baseline_sigma_threshold: Legacy deviation threshold (default 3.0)
             start_dashboard: Whether to auto-start the web dashboard
             dashboard_port: Port for the dashboard server
             wandb_logging: Whether to log metrics to WandB (requires wandb.init() to be called first)
@@ -116,7 +141,24 @@ class RewardScopeCallback(BaseCallback):
             enable_boundary_exploitation=enable_boundary_exploitation,
             observation_bounds=observation_bounds,
             action_bounds=action_bounds,
+            # Two-layer detection (Phase 2)
+            adaptive_baseline=adaptive_baseline,
+            baseline_window=baseline_window,
+            baseline_warmup=baseline_warmup,
+            baseline_sensitivity=baseline_sensitivity,
+            # Auto-calibration (Phase 5)
+            min_warmup_episodes=min_warmup_episodes,
+            max_warmup_episodes=max_warmup_episodes,
+            stability_threshold=stability_threshold,
+            # Legacy Phase 1
+            use_adaptive_baselines=use_adaptive_baselines,
+            calibration_episodes=calibration_episodes,
+            baseline_sigma_threshold=baseline_sigma_threshold,
         )
+
+        # Track baseline settings
+        self.adaptive_baseline = adaptive_baseline
+        self.use_adaptive_baselines = use_adaptive_baselines
 
         # Tracking
         self.episode_count = 0
@@ -128,6 +170,10 @@ class RewardScopeCallback(BaseCallback):
         if self.verbose >= 1:
             print(f"[RewardScope] Starting data collection for run: {self.run_name}")
             print(f"[RewardScope] Storage directory: {self.storage_dir}")
+            if self.adaptive_baseline:
+                print(f"[RewardScope] Two-layer detection enabled - baseline warmup for first {self.detector_suite.baseline_tracker.warmup} episodes")
+            if self.use_adaptive_baselines:
+                print(f"[RewardScope] Legacy adaptive baselines enabled - calibrating for first {self.detector_suite.calibration_episodes} episodes")
 
         # Start dashboard if requested
         if self.start_dashboard:
@@ -250,26 +296,33 @@ class RewardScopeCallback(BaseCallback):
                 info=info,
             )
 
-            # Print alerts if any
+            # Print alerts if any (with alert severity and confidence)
             if alerts and self.verbose >= 1:
                 for alert in alerts:
-                    print(f"[RewardScope] ALERT: {alert.type.value}: {alert.description}")
+                    severity_label = alert.alert_severity.value.upper()
+                    confidence_str = f" (confidence={alert.confidence:.2f})" if alert.confidence is not None else ""
+                    print(f"[RewardScope] {severity_label}{confidence_str}: {alert.type.value}: {alert.description}")
                     if self.verbose >= 2:
                         print(f"  Evidence: {alert.evidence}")
                         print(f"  Fix: {alert.suggested_fix}")
+                        if alert.baseline_z_score is not None:
+                            print(f"  Baseline z-score: {alert.baseline_z_score:.2f}")
 
             # Handle episode end
             if done or truncated:
                 episode_data = self.collector.end_episode()
 
-                # Run episode-level detectors
+                # Run episode-level detectors (pass episode number for two-layer detection)
                 episode_alerts = self.detector_suite.on_episode_end({
                     "component_totals": episode_data.component_totals,
+                    "episode": self.episode_count,
                 })
 
                 if episode_alerts and self.verbose >= 1:
                     for alert in episode_alerts:
-                        print(f"[RewardScope] 🚨 Episode {self.episode_count}: {alert.type.value}: {alert.description}")
+                        severity_label = alert.alert_severity.value.upper()
+                        confidence_str = f" (confidence={alert.confidence:.2f})" if alert.confidence is not None else ""
+                        print(f"[RewardScope] {severity_label}{confidence_str} Episode {self.episode_count}: {alert.type.value}: {alert.description}")
 
                 # Get hacking score and flags from detector suite
                 hacking_score = self.detector_suite.get_hacking_score()
@@ -295,10 +348,31 @@ class RewardScopeCallback(BaseCallback):
                 self._episode_start_step = self.step_count + 1
 
                 if self.verbose >= 1:
-                    print(f"[RewardScope] Episode {episode_data.episode} complete: "
-                          f"reward={episode_data.total_reward:.2f}, "
-                          f"length={episode_data.length}, "
-                          f"hacking_score={hacking_score:.3f}")
+                    # Build episode summary
+                    summary = f"[RewardScope] Episode {episode_data.episode} complete: " \
+                              f"reward={episode_data.total_reward:.2f}, " \
+                              f"length={episode_data.length}, " \
+                              f"hacking_score={hacking_score:.3f}"
+
+                    # Show warmup/calibration progress
+                    if self.adaptive_baseline and not self.detector_suite.baseline_is_active:
+                        progress = self.detector_suite.baseline_warmup_progress
+                        summary = f"[RewardScope] Episode {episode_data.episode} complete: " \
+                                  f"reward={episode_data.total_reward:.2f}, " \
+                                  f"length={episode_data.length} " \
+                                  f"(baseline warmup: {progress:.0%})"
+                    elif self.use_adaptive_baselines and not self.detector_suite.is_calibrated:
+                        progress = self.detector_suite.calibration_progress
+                        summary = f"[RewardScope] Episode {episode_data.episode} complete: " \
+                                  f"reward={episode_data.total_reward:.2f}, " \
+                                  f"length={episode_data.length} " \
+                                  f"(calibrating: {progress:.0%})"
+                    elif self.adaptive_baseline and self.detector_suite.baseline_is_active:
+                        suppressed = self.detector_suite.get_suppressed_count()
+                        if suppressed > 0:
+                            summary += f" (suppressed: {suppressed})"
+
+                    print(summary)
 
             # Increment step counter
             self.step_count += 1
@@ -359,14 +433,29 @@ class RewardScopeCallback(BaseCallback):
             all_alerts = self.detector_suite.get_all_alerts()
             if all_alerts:
                 print(f"  Total alerts: {len(all_alerts)}")
+
+                # Break down by alert severity (ALERT vs WARNING)
+                alert_count = sum(1 for a in all_alerts if a.alert_severity == AlertSeverity.ALERT)
+                warning_count = sum(1 for a in all_alerts if a.alert_severity == AlertSeverity.WARNING)
+                if alert_count > 0 or warning_count > 0:
+                    print(f"    - Confirmed alerts: {alert_count}")
+                    print(f"    - Soft warnings: {warning_count}")
+
+                # Break down by type
                 alert_types = {}
                 for alert in all_alerts:
                     alert_type = alert.type.value
                     alert_types[alert_type] = alert_types.get(alert_type, 0) + 1
 
-                print("  Alert breakdown:")
+                print("  Alert type breakdown:")
                 for alert_type, count in alert_types.items():
                     print(f"    - {alert_type}: {count}")
+
+            # Show suppressed count if two-layer detection was active
+            if self.adaptive_baseline:
+                suppressed = self.detector_suite.get_suppressed_count()
+                if suppressed > 0:
+                    print(f"  Suppressed false positives: {suppressed}")
 
         # Stop dashboard
         self._stop_dashboard()
@@ -385,3 +474,11 @@ class RewardScopeCallback(BaseCallback):
     def get_component_stats(self) -> Dict[str, Dict[str, float]]:
         """Get statistics for each reward component."""
         return self.decomposer.get_component_stats()
+
+    def get_baseline_summary(self):
+        """Get summary of adaptive baseline statistics (if enabled)."""
+        return self.detector_suite.get_baseline_summary()
+
+    def is_calibrated(self) -> bool:
+        """Check if adaptive baseline calibration is complete."""
+        return self.detector_suite.is_calibrated
